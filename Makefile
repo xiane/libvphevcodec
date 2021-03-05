@@ -21,6 +21,8 @@ DEPFILES += $(patsubst %cpp,%d,$(CXX_SRCS))
 
 INC = -I./include -I.
 TARGET = libvphevcodec.so
+LIB = /usr/lib
+INSTALL_DIR= $(LIB)/hevc_enc
 
 all: $(TARGET)
 
@@ -48,6 +50,11 @@ $(TARGET): $(C_OBJS) $(CXX_OBJS)
 %.d: %.c
 	@echo " [DEP] $<"
 	@$(CC) $(CFLAGS) -MM -MT "$(patsubst %.c,%.o,$<)" $< -MF $@
+
+install: $(TARGET)
+	mkdir -p $(INSTALL_DIR)
+	cp $^ $(INSTALL_DIR)
+	ln -fs $(INSTALL_DIR)/$^ $(LIB)/
 
 clean:
 	@rm -f $(DEPFILES)
