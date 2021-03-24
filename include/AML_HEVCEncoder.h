@@ -72,9 +72,6 @@ typedef struct HEVCEncParams_s {
     HEVCFlag rate_control; /* rate control enable, on: RC on, off: constant QP */
     int initQP; /* initial QP */
     uint32 bitrate; /* target encoding bit rate in bits/second */
-    uint32 CPB_size; /* coded picture buffer in number of bits */
-    uint32 init_CBP_removal_delay; /* initial CBP removal delay in msec */
-
     uint32 frame_rate; /* frame rate in the unit of frames per 1000 second */
     /* note, frame rate is only needed by the rate control, AVC is timestamp agnostic. */
 
@@ -87,8 +84,10 @@ typedef struct HEVCEncParams_s {
     uint32 dev_id; /* ID to identify the hardware encoder version */
     uint8 encode_once; /* flag to indicate encode once or twice */
 
+#if SUPPORT_SCALE
     uint32 src_width;  /*src buffer width before crop and scale */
     uint32 src_height; /*src buffer height before crop and scale */
+#endif
     HEVCRefreshType refresh_type; /*refresh type of intra picture*/
 } AMVHEVCEncParams;
 
@@ -147,7 +146,7 @@ typedef struct AMVHEVCEncHandle_s {
     vpu_buffer_t fbc_mv_vb;
     vpu_buffer_t subsample_vb;
 
-    AMVHEVCEncParams mEncParams;
+    AMVHEVCEncParams *mEncParams;
     bool mSpsPpsHeaderReceived;
     uint8_t mSPSPPSDataSize;
     uint8_t *mSPSPPSData;

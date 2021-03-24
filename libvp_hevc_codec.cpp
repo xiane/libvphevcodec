@@ -17,55 +17,39 @@ const char *vl_get_version() {
     return version;
 }
 
-AMVEnc_Status initEncParams(AMVHEVCEncHandle *handle, int width, int height, int frame_rate, int bit_rate, int gop) {
-    memset(&(handle->mEncParams), 0, sizeof(AMVHEVCEncParams));
-    VLOG(DEBUG, "bit_rate:%d", bit_rate);
-    if ((width % 16 != 0 || height % 2 != 0)) {
-        VLOG(DEBUG, "Video frame size %dx%d must be a multiple of 16", width, height);
-        //return -1;
-    } else if (height % 16 != 0) {
-        VLOG(DEBUG, "Video frame height is not standard:%d", height);
-    } else {
-        VLOG(DEBUG, "Video frame size is %d x %d", width, height);
-    }
-    handle->mEncParams.rate_control = HEVC_OFF;
-    handle->mEncParams.initQP = 0;
-    handle->mEncParams.init_CBP_removal_delay = 1600;
-    handle->mEncParams.auto_scd = HEVC_OFF;
-    handle->mEncParams.out_of_band_param_set = HEVC_OFF;
-    handle->mEncParams.num_ref_frame = 1;
-    handle->mEncParams.num_slice_group = 1;
+AMVHEVCEncParams * createEncParams() {
+    return new AMVHEVCEncParams;
+}
+
+void destroyEncParams(AMVHEVCEncParams * params) {
+    delete params;
+}
+
+int initEncParams(AMVHEVCEncParams * params) {
+    memset(params, 0, sizeof(AMVHEVCEncParams));
+
+    params->rate_control = HEVC_OFF;
+    params->auto_scd = HEVC_OFF;
+    params->out_of_band_param_set = HEVC_OFF;
+    params->num_ref_frame = 1;
+    params->num_slice_group = 1;
     //handle->mEncParams.nSliceHeaderSpacing = 0;
-    handle->mEncParams.fullsearch = HEVC_OFF;
-    handle->mEncParams.search_range = 16;
+    params->fullsearch = HEVC_OFF;
+    params->search_range = 16;
     //handle->mEncParams.sub_pel = HEVC_OFF;
     //handle->mEncParams.submb_pred = HEVC_OFF;
-    handle->mEncParams.width = width;
-    handle->mEncParams.height = height;
-    handle->mEncParams.src_width = width;
-    handle->mEncParams.src_height = height;
-    handle->mEncParams.bitrate = bit_rate;
-    handle->mEncParams.frame_rate = frame_rate;
-    handle->mEncParams.CPB_size = (uint32)(bit_rate >> 1);
-    handle->mEncParams.FreeRun = HEVC_OFF;
-    handle->mEncParams.MBsIntraRefresh = 0;
-    handle->mEncParams.MBsIntraOverlap = 0;
-    handle->mEncParams.encode_once = 1;
-    // Set IDR frame refresh interval
-    if (gop <= 0) {
-        handle->mEncParams.idr_period = 0;   //an infinite period, only one I frame
-    } else {
-        handle->mEncParams.idr_period = gop; //period of I frame, 1 means all frames are I type.
-    }
-    VLOG(DEBUG, "mEncParams.idrPeriod: %d, gop %d\n", handle->mEncParams.idr_period, gop);
+    params->FreeRun = HEVC_OFF;
+    params->MBsIntraRefresh = 0;
+    params->MBsIntraOverlap = 0;
+    params->encode_once = 1;
     // Set profile and level
-    handle->mEncParams.profile = HEVC_MAIN;
-    handle->mEncParams.level = HEVC_LEVEL_NONE; // firmware determines a level.
-    handle->mEncParams.tier = HEVC_TIER_MAIN;
-    handle->mEncParams.initQP = 30;
-    handle->mEncParams.BitrateScale = HEVC_OFF;
-    handle->mEncParams.refresh_type = HEVC_CRA;
-    return AMVENC_SUCCESS;
+    params->profile = HEVC_MAIN;
+    params->level = HEVC_LEVEL_NONE; // firmware determines a level.
+    params->tier = HEVC_TIER_MAIN;
+    params->initQP = 30;
+    params->BitrateScale = HEVC_OFF;
+    params->refresh_type = HEVC_CRA;
+    return 0;
 }
 
 vl_codec_handle_t vl_video_encoder_init(vl_codec_id_t codec_id, int width, int height, int frame_rate, int bit_rate, int gop) {
@@ -75,21 +59,57 @@ vl_codec_handle_t vl_video_encoder_init(vl_codec_id_t codec_id, int width, int h
     (void)codec_id;
 
     if (mHandle == NULL)
-        goto exit;
+        return (vl_codec_handle_t) NULL;
     memset(mHandle, 0, sizeof(AMVHEVCEncHandle));
-    ret = initEncParams(mHandle, width, height, frame_rate, bit_rate, gop);
-    if (ret < AMVENC_SUCCESS)
-        goto exit;
-    ret = AML_HEVCInitialize(mHandle, &(mHandle->mEncParams), &has_mix, 2);
-    if (ret < AMVENC_SUCCESS)
-        goto exit;
+
+    VLOG(DEBUG, "bit_rate:%d", bit_rate);
+    if ((width % 16 != 0 || height % 2 != 0)) {
+        VLOG(DEBUG, "Video frame size %dx%d must be a multiple of 16", width, height);
+        return (vl_codec_handle_t) NULL;
+    } else if (height % 16 != 0) {
+        VLOG(DEBUG, "Video frame height is not standard:%d", height);
+        return (vl_codec_handle_t) NULL;
+    } else {
+        VLOG(DEBUG, "Video frame size is %d x %d", width, height);
+    }
+
+    AMVHEVCEncParams *const params = createEncParams();
+    if (params == NULL) {
+        delete mHandle;
+        return (vl_codec_handle_t) NULL;
+    }
+
+    if(initEncParams(params)) {
+        destroyEncParams(params);
+        delete mHandle;
+        return (vl_codec_handle_t) NULL;
+    }
+
+    params->width = width;
+    params->height = height;
+#if SUPPORT_SCALE
+    params->src_width = width;
+    params->src_height = height;
+#endif
+    params->bitrate = bit_rate;
+    params->frame_rate = frame_rate;
+    // Set IDR frame refresh interval
+    if (gop <= 0) {
+        params->idr_period = 0;   //an infinite period, only one I frame
+    } else {
+        params->idr_period = gop; //period of I frame, 1 means all frames are I type.
+    }
+    VLOG(DEBUG, "mEncParams.idrPeriod: %d, gop %d\n", params->idr_period, gop);
+
+    ret = AML_HEVCInitialize(mHandle, params, &has_mix, 2);
+    if (ret < AMVENC_SUCCESS) {
+        destroyEncParams(params);
+        delete mHandle;
+        return (vl_codec_handle_t) NULL;
+    }
     mHandle->mSpsPpsHeaderReceived = false;
     mHandle->mNumInputFrames = -1;  // 1st two buffers contain SPS and PPS
     return (vl_codec_handle_t) mHandle;
-exit:
-    if (mHandle != NULL)
-        delete mHandle;
-    return (vl_codec_handle_t) NULL;
 }
 
 int vl_video_encoder_encode(vl_codec_handle_t codec_handle, vl_frame_type_t frame_type, unsigned char *in, unsigned int outputBufferLen, unsigned char *out, int format) {
@@ -124,11 +144,11 @@ int vl_video_encoder_encode(vl_codec_handle_t codec_handle, vl_frame_type_t fram
     if (handle->mNumInputFrames >= 0) {
         AMVHEVCEncFrameIO videoInput;
         memset(&videoInput, 0, sizeof(videoInput));
-        videoInput.height = handle->mEncParams.height;
-        videoInput.pitch = handle->mEncParams.width;//((handle->mEncParams.width + 15) >> 4) << 4;
+        videoInput.height = handle->mEncParams->height;
+        videoInput.pitch = handle->mEncParams->width;//((handle->mEncParams.width + 15) >> 4) << 4;
         /* TODO*/
-        videoInput.bitrate = handle->mEncParams.bitrate;
-        videoInput.frame_rate = handle->mEncParams.frame_rate / 1000;
+        videoInput.bitrate = handle->mEncParams->bitrate;
+        videoInput.frame_rate = handle->mEncParams->frame_rate / 1000;
         videoInput.coding_timestamp = handle->mNumInputFrames * 1000 / videoInput.frame_rate;  // in ms
         videoInput.YCbCr[0] = (unsigned long)&in[0];
         videoInput.YCbCr[1] = (unsigned long)(videoInput.YCbCr[0] + videoInput.height * videoInput.pitch);
@@ -211,6 +231,8 @@ int vl_video_encoder_destory(vl_codec_handle_t codec_handle) {
     AML_HEVCRelease(handle);
     if (handle->mSPSPPSData)
         free(handle->mSPSPPSData);
+    if (handle->mEncParams)
+        destroyEncParams(handle->mEncParams);
     if (handle)
         delete handle;
     return 1;

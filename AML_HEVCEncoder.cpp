@@ -1006,7 +1006,7 @@ AMVEnc_Status Wave4VpuEncSeqInit(AMVHEVCEncHandle *Handle, int alloc) {
     temp = 0;
     temp |= Handle->idrPeriod << 16;
     temp |= 30 << 3;
-    temp |= Handle->mEncParams.refresh_type; //[2:0] refresh type of intra picutre
+    temp |= Handle->mEncParams->refresh_type; //[2:0] refresh type of intra picutre
     VpuWriteReg(coreIdx, W4_CMD_ENC_SEQ_INTRA_PARAM, temp);
     //VpuWriteReg(coreIdx, W4_CMD_ENC_SEQ_INTRA_PARAM, (Handle->idrPeriod << 16) | 0xf1);
 
@@ -1612,7 +1612,7 @@ AMVEnc_Status Wave4VpuEncEncPic(AMVHEVCEncHandle *Handle, Uint32 idx, int end, u
             if (Handle->mNumInputFrames == 1)
                 *nal_type = HEVC_IDR;
             else
-                *nal_type = Handle->mEncParams.refresh_type;
+                *nal_type = Handle->mEncParams->refresh_type;
         } else if ((temp & 0xff) == P_SLICE || (temp & 0xff) == B_SLICE)
            *nal_type = NON_IRAP;
     }
@@ -1686,6 +1686,7 @@ AMVEnc_Status AML_HEVCInitialize(AMVHEVCEncHandle *Handle, AMVHEVCEncParams *enc
     AMVEnc_Status ret;
     (void)has_mix;
     (void)force_mode;
+    Handle->mEncParams = encParam;
 
     Handle->instance_id = 0;
     Handle->src_idx = 0;
