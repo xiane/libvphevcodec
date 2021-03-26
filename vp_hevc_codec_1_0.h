@@ -80,7 +80,7 @@ int vl_video_encoder_encode(vl_codec_handle_t handle, vl_frame_type_t type, unsi
  *@param ：handle: encoder handle
  *@return ：if success return 1,else return 0
  */
-int vl_video_encoder_destory(vl_codec_handle_t handle);
+int vl_video_encoder_destroy(vl_codec_handle_t handle);
 
 /**
  * init decoder
