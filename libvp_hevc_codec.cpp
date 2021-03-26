@@ -112,7 +112,7 @@ vl_codec_handle_t vl_video_encoder_init(vl_codec_id_t codec_id, int width, int h
     return (vl_codec_handle_t) mHandle;
 }
 
-int vl_video_encoder_encode(vl_codec_handle_t codec_handle, vl_frame_type_t frame_type, unsigned char *in, unsigned int outputBufferLen, unsigned char *out, int format) {
+int vl_video_encoder_encode(vl_codec_handle_t codec_handle, vl_frame_type_t frame_type, unsigned char *in, unsigned int outputBufferLen, unsigned char *out, vl_img_format_t format) {
     AMVEnc_Status ret;
     uint32_t dataLength = 0;
     int type = 0;
@@ -152,20 +152,27 @@ int vl_video_encoder_encode(vl_codec_handle_t codec_handle, vl_frame_type_t fram
         videoInput.coding_timestamp = handle->mNumInputFrames * 1000 / videoInput.frame_rate;  // in ms
         videoInput.YCbCr[0] = (unsigned long)&in[0];
         videoInput.YCbCr[1] = (unsigned long)(videoInput.YCbCr[0] + videoInput.height * videoInput.pitch);
-        if (format == 0) {
-            videoInput.fmt = AMVENC_NV21;
-            videoInput.YCbCr[2] = 0;
-        } else if (format == 1) {
-            videoInput.fmt = AMVENC_NV12;
-            videoInput.YCbCr[2] = 0;
-        } else if (format == 2) {
-            videoInput.fmt = AMVENC_RGB888;
-            videoInput.YCbCr[1] = 0;
-            videoInput.YCbCr[2] = 0;
-        } else {
-            videoInput.fmt = AMVENC_YUV420;
-            videoInput.YCbCr[2] = (unsigned long)(videoInput.YCbCr[1] + videoInput.height * videoInput.pitch / 4);
+
+        switch (format) {
+            case IMG_FMT_NV12:
+                videoInput.fmt = AMVENC_NV12;
+                videoInput.YCbCr[2] = 0;
+                break;
+            case IMG_FMT_NV21:
+                videoInput.fmt = AMVENC_NV21;
+                videoInput.YCbCr[2] = 0;
+                break;
+            case IMG_FMT_RGB888:
+                videoInput.fmt = AMVENC_RGB888;
+                videoInput.YCbCr[1] = 0;
+                videoInput.YCbCr[2] = 0;
+                break;
+            default:
+                videoInput.fmt = AMVENC_YUV420;
+                videoInput.YCbCr[2] = (unsigned long)(videoInput.YCbCr[1] + videoInput.height * videoInput.pitch / 4);
+                break;
         }
+
         videoInput.canvas = 0xffffffff;
         videoInput.type = VMALLOC_BUFFER;
         videoInput.disp_order = handle->mNumInputFrames;

@@ -23,6 +23,8 @@ typedef enum vl_img_format_e
     IMG_FMT_NV12, /* must support  */
     IMG_FMT_NV21,
     IMG_FMT_YV12,
+    IMG_FMT_YUV420,
+    IMG_FMT_RGB888,
 } vl_img_format_t;
 
 typedef enum vl_frame_type_e
@@ -72,7 +74,7 @@ vl_codec_handle_t vl_video_encoder_init(vl_codec_id_t codec_id, int width, int h
  *@param : out: data output,HEVC need header(0x00，0x00，0x00，0x01),and format must be I420(apk set param out，through jni,so modify "out" in the function,don't change address point)
  *@return ：if success return encoded data length,else return error
  */
-int vl_video_encoder_encode(vl_codec_handle_t handle, vl_frame_type_t type, unsigned char *in, unsigned int outputBufferLen, unsigned char *out, int format);
+int vl_video_encoder_encode(vl_codec_handle_t handle, vl_frame_type_t type, unsigned char *in, unsigned int outputBufferLen, unsigned char *out, vl_img_format_t format);
 
 /**
  * destroy encoder
