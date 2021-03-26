@@ -1403,14 +1403,11 @@ AMVEnc_Status Wave4VpuEncRegisterFrame(AMVHEVCEncHandle *Handle, int alloc) {
 }
 
 AMVEnc_Status Wave4VpuEncGetHeader(AMVHEVCEncHandle *Handle, unsigned char *buffer, unsigned int *buf_nal_size) {
-    //int coreIdx = 0;
     Uint32 addr_report_buf = 0;    // [31:0]
     Uint32 report_buf_size = 0;    // [31:0]
     unsigned char report_endian = 0;    // [ 3:0]
     //Uint32 use_sec_axi = 0;    // [31:0]
     //Uint32 sec_axi_buf_size = 0x00012800;   // 74KB
-    Uint32 temp;   // [31:0]
-    Uint32 rd_ptr, wr_ptr;// src_num, fb_num, i, j;   // [31:0]
 
     // Bitstream Buffer Setting
     VpuWriteReg(Handle->instance_id, W4_BS_START_ADDR, Handle->bs_vb.phys_addr);
@@ -1418,11 +1415,11 @@ AMVEnc_Status Wave4VpuEncGetHeader(AMVHEVCEncHandle *Handle, unsigned char *buff
     VpuWriteReg(Handle->instance_id, W4_BS_PARAM, 0xf);
     VpuWriteReg(Handle->instance_id, W4_BS_OPTION, 0);
 
-    temp = 0;
-    temp |= (0 << 24); // [27:24] codec_std_aux
-    temp |= (1 << 16); // [23:16] codec_std
-    temp |= (Handle->instance_id << 0);  // [15: 0] Handle->instance_id
-    VpuWriteReg(Handle->instance_id, W4_INST_INDEX, temp);
+    uint32_t current_idx = 0;
+    current_idx |= (0 << 24); // [27:24] codec_std_aux
+    current_idx |= (1 << 16); // [23:16] codec_std
+    current_idx |= (Handle->instance_id << 0);  // [15: 0] Handle->instance_id
+    VpuWriteReg(Handle->instance_id, W4_INST_INDEX, current_idx);
 
     // Work Buffer Setting
     VpuWriteReg(Handle->instance_id, W4_ADDR_WORK_BASE, Handle->work_vb.phys_addr);
@@ -1453,8 +1450,10 @@ AMVEnc_Status Wave4VpuEncGetHeader(AMVHEVCEncHandle *Handle, unsigned char *buff
     VpuWriteReg(Handle->instance_id, W4_CORE_INDEX, 0);
     VpuWriteReg(Handle->instance_id, W4_COMMAND, ENC_PIC);
     VpuWriteReg(Handle->instance_id, W4_VPU_HOST_INT_REQ, 1);
-    temp = VpuReadReg(Handle->instance_id, W4_VPU_BUSY_STATUS);
-    VLOG(DEBUG, "W4_VPU_BUSY_STATUS :0x%x\n", temp);
+
+    uint32_t status = VpuReadReg(Handle->instance_id, W4_VPU_BUSY_STATUS);
+    VLOG(DEBUG, "W4_VPU_BUSY_STATUS :0x%x\n", status);
+
     if (vdi_wait_interrupt(Handle->instance_id, VPU_BUSY_CHECK_TIMEOUT) == -1) {
         VLOG(ERR, "Wave4VpuEncGetHeader error time out\n");
         return AMVENC_TIMEOUT;
@@ -1465,20 +1464,25 @@ AMVEnc_Status Wave4VpuEncGetHeader(AMVHEVCEncHandle *Handle, unsigned char *buff
         VLOG(ERR, "Wave4VpuEncGetHeader failedREASON CODE(%08x)\n", reasonCode);
         return AMVENC_HARDWARE;
     }
-    temp = VpuReadReg(Handle->instance_id, W4_RET_SUCCESS);
-    VLOG(DEBUG, "W4_RET_SUCCESS %x\n", temp);
-    rd_ptr = VpuReadReg(Handle->instance_id, W4_BS_RD_PTR);
-    wr_ptr = VpuReadReg(Handle->instance_id, W4_BS_WR_PTR);
-    temp = VpuReadReg(Handle->instance_id, W4_RET_ENC_PIC_BYTE);
+    uint32_t result = VpuReadReg(Handle->instance_id, W4_RET_SUCCESS);
+    VLOG(DEBUG, "W4_RET_SUCCESS %x\n", result);
 
-    if (temp > Handle->mOutputBufferLen) {
-        VLOG(ERR, "nal size %d bigger than output buffer %d!\n", temp, Handle->mOutputBufferLen);
-        return AMVENC_OVERFLOW;
+    {
+        Uint32 rd_ptr, wr_ptr;
+
+        rd_ptr = VpuReadReg(Handle->instance_id, W4_BS_RD_PTR);
+        wr_ptr = VpuReadReg(Handle->instance_id, W4_BS_WR_PTR);
+        uint32_t header_length = VpuReadReg(Handle->instance_id, W4_RET_ENC_PIC_BYTE);
+
+        if (header_length > Handle->mOutputBufferLen) {
+            VLOG(ERR, "nal size %d bigger than output buffer %d!\n", header_length, Handle->mOutputBufferLen);
+            return AMVENC_OVERFLOW;
+        }
+        *buf_nal_size = header_length;
+        vdi_read_memory(Handle->instance_id, rd_ptr, (unsigned char *) buffer, header_length);
+        VpuWriteReg(Handle->instance_id, W4_BS_RD_PTR, wr_ptr);
+        VLOG(DEBUG, "Wave4VpuEncGetHeader, rd:0x%x, wr:0x%x, ret bytes: %d, buffer size:%d\n", rd_ptr, wr_ptr, header_length, wr_ptr - rd_ptr);
     }
-    *buf_nal_size = temp;
-    vdi_read_memory(Handle->instance_id, rd_ptr, (unsigned char *) buffer, temp);
-    VpuWriteReg(Handle->instance_id, W4_BS_RD_PTR, wr_ptr);
-    VLOG(DEBUG, "Wave4VpuEncGetHeader, rd:0x%x, wr:0x%x, ret bytes: %d, buffer size:%d\n", rd_ptr, wr_ptr, temp, wr_ptr - rd_ptr);
     return AMVENC_SUCCESS;
 }
 
@@ -1489,7 +1493,6 @@ AMVEnc_Status Wave4VpuEncEncPic(AMVHEVCEncHandle *Handle, Uint32 idx, int end, u
     unsigned char report_endian = 0;    // [ 3:0]
     //Uint32 use_sec_axi = 0;    // [31:0]
     //Uint32 sec_axi_buf_size = 0x00012800;   // 74KB
-    Uint32 temp;   // [31:0]
     Uint32 rd_ptr, wr_ptr;
     //Uint32 src_num, fb_num, i, j;   // [31:0]
     Uint32 src_stride;
@@ -1513,11 +1516,11 @@ AMVEnc_Status Wave4VpuEncEncPic(AMVHEVCEncHandle *Handle, Uint32 idx, int end, u
     VpuWriteReg(Handle->instance_id, W4_BS_PARAM, 0xf);
     VpuWriteReg(Handle->instance_id, W4_BS_OPTION, 0);
 
-    temp = 0;
-    temp |= (0 << 24); // [27:24] codec_std_aux
-    temp |= (1 << 16); // [23:16] codec_std
-    temp |= (Handle->instance_id << 0);  // [15: 0] Handle->instance_id
-    VpuWriteReg(Handle->instance_id, W4_INST_INDEX, temp);
+    uint32_t current_idx = 0;
+    current_idx |= (0 << 24); // [27:24] codec_std_aux
+    current_idx |= (1 << 16); // [23:16] codec_std
+    current_idx |= (Handle->instance_id << 0);  // [15: 0] Handle->instance_id
+    VpuWriteReg(Handle->instance_id, W4_INST_INDEX, current_idx);
 
     // Work Buffer Setting
     VpuWriteReg(Handle->instance_id, W4_ADDR_WORK_BASE, Handle->work_vb.phys_addr);
@@ -1574,8 +1577,8 @@ AMVEnc_Status Wave4VpuEncEncPic(AMVHEVCEncHandle *Handle, Uint32 idx, int end, u
     VpuWriteReg(Handle->instance_id, W4_RET_FAIL_REASON, 0);  //for debug
     VpuWriteReg(Handle->instance_id, W4_COMMAND, ENC_PIC);
     VpuWriteReg(Handle->instance_id, W4_VPU_HOST_INT_REQ, 1);
-    temp = VpuReadReg(Handle->instance_id, W4_VPU_BUSY_STATUS);
-    VLOG(NONE, "W4_VPU_BUSY_STATUS :0x%x\n", temp);
+    uint32_t status = VpuReadReg(Handle->instance_id, W4_VPU_BUSY_STATUS);
+    VLOG(NONE, "W4_VPU_BUSY_STATUS :0x%x\n", status);
     if (vdi_wait_interrupt(Handle->instance_id, VPU_BUSY_CHECK_TIMEOUT) == -1) {
         VLOG(ERR, "Wave4VpuEncEncPic error time out\n");
         Wave4VpuReset(Handle, coreIdx, reset_mode);
@@ -1588,36 +1591,42 @@ AMVEnc_Status Wave4VpuEncEncPic(AMVHEVCEncHandle *Handle, Uint32 idx, int end, u
         Wave4VpuReset(Handle, coreIdx, reset_mode);
         return AMVENC_HARDWARE;
     }
-    temp = VpuReadReg(Handle->instance_id, W4_RET_SUCCESS);
-    VLOG(NONE, "W4_RET_SUCCESS %x\n", temp);
-    rd_ptr = VpuReadReg(Handle->instance_id, W4_BS_RD_PTR);
-    wr_ptr = VpuReadReg(Handle->instance_id, W4_BS_WR_PTR);
-    temp = VpuReadReg(Handle->instance_id, W4_RET_ENC_PIC_BYTE);
-    VLOG(NONE, "Wave4VpuEncEncPic, rd:0x%x, wr:0x%x, ret bytes: %d, buffer size:%d\n", rd_ptr, wr_ptr, temp, wr_ptr - rd_ptr);
 
-    if (temp > Handle->mOutputBufferLen) {
-        VLOG(ERR, "nal size %d bigger than output buffer %d!\n", temp, Handle->mOutputBufferLen);
-        return AMVENC_OVERFLOW;
+    uint32_t result = VpuReadReg(Handle->instance_id, W4_RET_SUCCESS);
+    VLOG(NONE, "W4_RET_SUCCESS %x\n", result );
+
+    {
+        rd_ptr = VpuReadReg(Handle->instance_id, W4_BS_RD_PTR);
+        wr_ptr = VpuReadReg(Handle->instance_id, W4_BS_WR_PTR);
+
+        uint32_t nal_length = VpuReadReg(Handle->instance_id, W4_RET_ENC_PIC_BYTE);
+        VLOG(NONE, "Wave4VpuEncEncPic, rd:0x%x, wr:0x%x, ret bytes: %d, buffer size:%d\n", rd_ptr, wr_ptr, nal_length, wr_ptr - rd_ptr);
+
+        if (nal_length > Handle->mOutputBufferLen) {
+            VLOG(ERR, "nal size %d bigger than output buffer %d!\n", nal_length, Handle->mOutputBufferLen);
+            return AMVENC_OVERFLOW;
+        }
+        if (buf_nal_size != NULL)
+            *buf_nal_size = nal_length;
+        if (nal_length && (buffer!= NULL))
+            vdi_read_memory(Handle->instance_id, rd_ptr, (unsigned char *)buffer, nal_length);
+        else if (buffer == NULL)
+            VLOG(DEBUG, "HEVC flushing input");
+        VLOG(DEBUG, "Wave4VpuEncEncPic %d, ret bytes: %d, buffer size:%d", Handle->enc_counter, nal_length, wr_ptr - rd_ptr);
     }
-    if (buf_nal_size != NULL)
-        *buf_nal_size = temp;
-    if (temp && (buffer!= NULL))
-        vdi_read_memory(Handle->instance_id, rd_ptr, (unsigned char *)buffer, temp);
-    else if (buffer == NULL)
-        VLOG(DEBUG, "HEVC flushing input");
-    VLOG(DEBUG, "Wave4VpuEncEncPic %d, ret bytes: %d, buffer size:%d", Handle->enc_counter, temp, wr_ptr - rd_ptr);
-    temp = VpuReadReg(Handle->instance_id, W4_RET_ENC_PIC_TYPE);
+
+    uint32_t type = VpuReadReg(Handle->instance_id, W4_RET_ENC_PIC_TYPE);
     if (nal_type != NULL) {
-        if ((temp & 0xff) == I_SLICE) {
+        if ((type& 0xff) == I_SLICE) {
             if (Handle->mNumInputFrames == 1)
                 *nal_type = HEVC_IDR;
             else
                 *nal_type = Handle->mEncParams->refresh_type;
-        } else if ((temp & 0xff) == P_SLICE || (temp & 0xff) == B_SLICE)
+        } else if ((type& 0xff) == P_SLICE || (type & 0xff) == B_SLICE)
            *nal_type = NON_IRAP;
     }
 
-    VLOG(DEBUG, "Wave4VpuEncEncPic PIC type: 0x%x", temp);
+    VLOG(DEBUG, "Wave4VpuEncEncPic PIC type: 0x%x", type);
 
     VpuWriteReg(Handle->instance_id, W4_BS_RD_PTR, wr_ptr);
     VpuWriteReg(Handle->instance_id, W4_RET_ENC_PIC_BYTE, 0);
