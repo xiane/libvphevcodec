@@ -121,6 +121,26 @@ static void set_ge2dinfo(aml_ge2d_info_t *pge2dinfo, AMVHEVCEncParams *encParam)
 }
 #endif
 
+// need to change buffer recieve method from address to src_pics included,
+void dumpCodedPicture(AMVHEVCEncHandle *Handle, const int idx, const unsigned char *buffer, const uint32_t nal_length) {
+    VLOG(INFO, "-------------- Picture[%d] dump --------------", idx);
+    VLOG(INFO, " widthxheight - %dx%d", Handle->src_pics[idx].width, Handle->src_pics[idx].height);
+    VLOG(INFO, " nal_type     - %x", Handle->src_pics[idx].type);
+    VLOG(INFO, " order, pts   - %d, %d", Handle->src_pics[idx].order,  Handle->src_pics[idx].pts);
+    VLOG(INFO, " nal_length   - %d", nal_length);
+    VLOG(INFO, "-------------- NAL + PayLoad Start -----------------");
+
+    int max_stride = nal_length / 4;
+    for (int i = 0; i < max_stride; i += 8)
+        VLOG(INFO, "[%d] %2x %2x %2x %2x %2x %2x %2x %2x", i,
+                buffer[i], buffer[i+1], buffer[i+2], buffer[i+3], buffer[i+4], buffer[i+5], buffer[i+6], buffer[i+7]);
+
+    for(int i=0; i < nal_length%4; i++)
+        VLOG(INFO, "[%d] %2x", i, buffer[i]);
+
+    VLOG(INFO, "-------------- PayLoad End -------------------");
+}
+
 void PrintVpuStatus(u32 coreIdx) {
     if (1) {
         int rd, wr;
@@ -1208,8 +1228,9 @@ AMVEnc_Status Wave4VpuEncRegisterFrame(AMVHEVCEncHandle *Handle, int alloc) {
     Handle->fb_num = fb_num;
 
     if (alloc) {
+        memset((void*) &Handle->src_pics[i], 0, sizeof(hevc_picture_t));
         for (i = 0; i < 4; i++) {
-            memset((void*) &Handle->src_vb[i], 0, sizeof(vpu_buffer_t));
+            memset((void*) &Handle->src_pics[i].vb, 0, sizeof(vpu_buffer_t));
             memset((void*) &Handle->fb_vb[i], 0, sizeof(vpu_buffer_t));
         }
         memset((void*) &Handle->fbc_ltable_vb, 0, sizeof(vpu_buffer_t));
@@ -1250,18 +1271,18 @@ AMVEnc_Status Wave4VpuEncRegisterFrame(AMVHEVCEncHandle *Handle, int alloc) {
     size_s2 = wave420l_align16(size_s2);
     for (i = 0; i < src_num; i++) {
         if (alloc) {
-            memset((void*) &Handle->src_vb[i], 0, sizeof(vpu_buffer_t));
-            Handle->src_vb[i].size = size_src_luma + size_src_chroma;
-            Handle->src_vb[i].size = ((Handle->src_vb[i].size + 4095) & ~4095) + 4096;
-            Handle->src_vb[i].cached = 1;
-            if (vdi_allocate_dma_memory(Handle->instance_id, &Handle->src_vb[i]) < 0) {
-                VLOG(ERR, "Wave4VpuEncRegisterFrame  error Handle->src_vb alloc\n");
+            memset((void*) &Handle->src_pics[i].vb, 0, sizeof(vpu_buffer_t));
+            Handle->src_pics[i].vb.size = size_src_luma + size_src_chroma;
+            Handle->src_pics[i].vb.size = ((Handle->src_pics[i].vb.size + 4095) & ~4095) + 4096;
+            Handle->src_pics[i].vb.cached = 1;
+            if (vdi_allocate_dma_memory(Handle->instance_id, &Handle->src_pics[i].vb) < 0) {
+                VLOG(ERR, "Wave4VpuEncRegisterFrame  error Handle->src_pics.vb alloc\n");
                 return AMVENC_MEMORY_FAIL;
             }
-            vdi_clear_memory(Handle->instance_id, Handle->src_vb[i].phys_addr, Handle->src_vb[i].size);
+            vdi_clear_memory(Handle->instance_id, Handle->src_pics[i].vb.phys_addr, Handle->src_pics[i].vb.size);
         }
-        src_fb_addr[i][0] = Handle->src_vb[i].phys_addr;
-        src_fb_addr[i][1] = Handle->src_vb[i].phys_addr + size_src_luma;
+        src_fb_addr[i][0] = Handle->src_pics[i].vb.phys_addr;
+        src_fb_addr[i][1] = Handle->src_pics[i].vb.phys_addr + size_src_luma;
         src_fb_addr[i][2] = 0;
     }
 
@@ -1545,7 +1566,7 @@ AMVEnc_Status Wave4VpuEncEncPic(AMVHEVCEncHandle *Handle, Uint32 idx, int end, u
     VpuWriteReg(Handle->instance_id, W4_CMD_ENC_REPORT_PARAM, report_endian);
 
     VpuWriteReg(Handle->instance_id, W4_CMD_ENC_CODE_OPTION, 3);
-    if (Handle->idrPeriod == -1 || (Handle->op_flag & AMVEncFrameIO_FORCE_IDR_FLAG))
+    if (Handle->idrPeriod == -1 || (Handle->src_pics[idx].op_flag & AMVEncFrameIO_FORCE_IDR_FLAG))
         VpuWriteReg(Handle->instance_id, W4_CMD_ENC_PIC_PARAM, (3 << 21) | (1 << 20));
     else
         VpuWriteReg(Handle->instance_id, W4_CMD_ENC_PIC_PARAM, 0);
@@ -1553,9 +1574,9 @@ AMVEnc_Status Wave4VpuEncEncPic(AMVHEVCEncHandle *Handle, Uint32 idx, int end, u
         VpuWriteReg(Handle->instance_id, W4_CMD_ENC_SRC_PIC_IDX, 0xffffffff);
     else
         VpuWriteReg(Handle->instance_id, W4_CMD_ENC_SRC_PIC_IDX, idx);
-    VpuWriteReg(Handle->instance_id, W4_CMD_ENC_SRC_ADDR_Y, Handle->src_vb[idx].phys_addr);
-    VpuWriteReg(Handle->instance_id, W4_CMD_ENC_SRC_ADDR_U, Handle->src_vb[idx].phys_addr + size_src_luma);
-    VpuWriteReg(Handle->instance_id, W4_CMD_ENC_SRC_ADDR_V, Handle->src_vb[idx].phys_addr + size_src_luma);
+    VpuWriteReg(Handle->instance_id, W4_CMD_ENC_SRC_ADDR_Y, Handle->src_pics[idx].vb.phys_addr);
+    VpuWriteReg(Handle->instance_id, W4_CMD_ENC_SRC_ADDR_U, Handle->src_pics[idx].vb.phys_addr + size_src_luma);
+    VpuWriteReg(Handle->instance_id, W4_CMD_ENC_SRC_ADDR_V, Handle->src_pics[idx].vb.phys_addr + size_src_luma);
     VpuWriteReg(Handle->instance_id, W4_CMD_ENC_SRC_STRIDE, (src_stride << 16) | src_stride);
     VpuWriteReg(Handle->instance_id, W4_CMD_ENC_SRC_FORMAT, ((2 + Handle->mUvSwap) << 0) | (0 << 3) | (gol_endian << 6));
 
@@ -1595,11 +1616,12 @@ AMVEnc_Status Wave4VpuEncEncPic(AMVHEVCEncHandle *Handle, Uint32 idx, int end, u
     uint32_t result = VpuReadReg(Handle->instance_id, W4_RET_SUCCESS);
     VLOG(NONE, "W4_RET_SUCCESS %x\n", result );
 
+    uint32_t nal_length;
     {
         rd_ptr = VpuReadReg(Handle->instance_id, W4_BS_RD_PTR);
         wr_ptr = VpuReadReg(Handle->instance_id, W4_BS_WR_PTR);
 
-        uint32_t nal_length = VpuReadReg(Handle->instance_id, W4_RET_ENC_PIC_BYTE);
+        nal_length = VpuReadReg(Handle->instance_id, W4_RET_ENC_PIC_BYTE);
         VLOG(NONE, "Wave4VpuEncEncPic, rd:0x%x, wr:0x%x, ret bytes: %d, buffer size:%d\n", rd_ptr, wr_ptr, nal_length, wr_ptr - rd_ptr);
 
         if (nal_length > Handle->mOutputBufferLen) {
@@ -1615,7 +1637,7 @@ AMVEnc_Status Wave4VpuEncEncPic(AMVHEVCEncHandle *Handle, Uint32 idx, int end, u
         VLOG(DEBUG, "Wave4VpuEncEncPic %d, ret bytes: %d, buffer size:%d", Handle->enc_counter, nal_length, wr_ptr - rd_ptr);
     }
 
-    uint32_t type = VpuReadReg(Handle->instance_id, W4_RET_ENC_PIC_TYPE);
+    uint32_t type = Handle->src_pics[idx].type = VpuReadReg(Handle->instance_id, W4_RET_ENC_PIC_TYPE);
     if (nal_type != NULL) {
         if ((type& 0xff) == I_SLICE) {
             if (Handle->mNumInputFrames == 1)
@@ -1628,6 +1650,7 @@ AMVEnc_Status Wave4VpuEncEncPic(AMVHEVCEncHandle *Handle, Uint32 idx, int end, u
 
     VLOG(DEBUG, "Wave4VpuEncEncPic PIC type: 0x%x", type);
 
+    //dumpCodedPicture(Handle, idx, buffer, nal_length);
     VpuWriteReg(Handle->instance_id, W4_BS_RD_PTR, wr_ptr);
     VpuWriteReg(Handle->instance_id, W4_RET_ENC_PIC_BYTE, 0);
     return AMVENC_SUCCESS;
@@ -1763,14 +1786,23 @@ AMVEnc_Status AML_HEVCSetInput(AMVHEVCEncHandle *Handle, AMVHEVCEncFrameIO *inpu
     Uint32 luma_stride, chroma_stride;
     Uint32 size_src_luma, size_src_chroma;
     char *y = NULL;
+    uint32_t idx = Handle->src_idx;
 
-    Handle->op_flag = input->op_flag;
-    Handle->fmt = input->fmt;
-    if (Handle->fmt != AMVENC_NV12 && Handle->fmt != AMVENC_NV21 && Handle->fmt != AMVENC_YUV420) {
+    Handle->src_pics[idx].op_flag = input->op_flag;
+    AMVEncFrameFmt fmt = Handle->src_pics[idx].fmt = input->fmt;
+    Handle->src_pics[idx].frame_rate = input->frame_rate;
+    Handle->src_pics[idx].width = input->pitch;
+    Handle->src_pics[idx].height = input->height;
+    Handle->src_pics[idx].order = input->disp_order;
+
+    float ms_per_frame = 1000.0f / input->frame_rate;
+    int64_t pts = Handle->src_pics[idx].pts = ms_per_frame * input->disp_order + 1;
+
+    if (fmt != AMVENC_NV12 && fmt != AMVENC_NV21 && fmt != AMVENC_YUV420) {
         if (INIT_GE2D) {
 #if SUPPORT_SCALE
-            if (ge2d_colorFormat(Handle->fmt) == AMVENC_SUCCESS) {
-                VLOG(DEBUG, "The %d of color format that HEVC need ge2d to change!", Handle->fmt);
+            if (ge2d_colorFormat(fmt) == AMVENC_SUCCESS) {
+                VLOG(DEBUG, "The %d of color format that HEVC need ge2d to change!", fmt);
             } else
 #endif
             {
@@ -1778,7 +1810,7 @@ AMVEnc_Status AML_HEVCSetInput(AMVHEVCEncHandle *Handle, AMVHEVCEncFrameIO *inpu
             }
         }
     }
-    if (Handle->fmt == AMVENC_NV12) {
+    if (fmt == AMVENC_NV12) {
         Handle->mUvSwap = 0;
     }
 
@@ -1794,7 +1826,7 @@ AMVEnc_Status AML_HEVCSetInput(AMVHEVCEncHandle *Handle, AMVHEVCEncFrameIO *inpu
 #if SUPPORT_SCALE
     if ((input->scale_width !=0 && input->scale_height !=0) || input->crop_left != 0 ||
         input->crop_right != 0 || input->crop_top != 0 || input->crop_bottom != 0 ||
-        (Handle->fmt != AMVENC_NV12 && Handle->fmt != AMVENC_NV21 && Handle->fmt != AMVENC_YUV420)) {
+        (fmt != AMVENC_NV12 && fmt != AMVENC_NV21 && fmt != AMVENC_YUV420)) {
         if (INIT_GE2D) {
             INIT_GE2D = false;
             amlge2d.ge2dinfo.src_info[0].format = SRC1_PIXFORMAT;
@@ -1814,30 +1846,30 @@ AMVEnc_Status AML_HEVCSetInput(AMVHEVCEncHandle *Handle, AMVHEVCEncFrameIO *inpu
             VLOG(ERR, "HEVC crop and scale must be 32bit aligned");
             return AMVENC_FAIL;
         }
-        if (Handle->fmt == AMVENC_RGBA8888)
+        if (fmt == AMVENC_RGBA8888)
             memcpy((void *)amlge2d.ge2dinfo.src_info[0].vaddr[0], (void *)input->YCbCr[0], 4 * input->pitch * input->height);
-        else if (Handle->fmt == AMVENC_NV12 || Handle->fmt == AMVENC_NV21) {
+        else if (fmt == AMVENC_NV12 || fmt == AMVENC_NV21) {
             memcpy((void *)amlge2d.ge2dinfo.src_info[0].vaddr[0], (void *)input->YCbCr[0], input->pitch * input->height);
             memcpy((void *) ((char *)amlge2d.ge2dinfo.src_info[0].vaddr[0] + input->pitch * input->height), (void *)input->YCbCr[1], input->pitch * input->height / 2);
-        } else if (Handle->fmt == AMVENC_YUV420) {
+        } else if (fmt == AMVENC_YUV420) {
             memcpy((void *)amlge2d.ge2dinfo.src_info[0].vaddr[0], (void *)input->YCbCr[0], input->pitch * input->height);
             memcpy((void *) ((char *)amlge2d.ge2dinfo.src_info[0].vaddr[0] + input->pitch * input->height), (void *)input->YCbCr[1], input->pitch * input->height / 4);
             memcpy((void *) ((char *)amlge2d.ge2dinfo.src_info[0].vaddr[0] + (input->pitch * input->height * 5) /4), (void *)input->YCbCr[2], input->pitch * input->height / 4);
-        } else if (Handle->fmt == AMVENC_RGB888)
+        } else if (fmt == AMVENC_RGB888)
             memcpy((void *)amlge2d.ge2dinfo.src_info[0].vaddr[0], (void *)input->YCbCr[0], input->pitch * input->height * 3);
         do_strechblit(&amlge2d.ge2dinfo, input);
         aml_ge2d_invalid_cache(&amlge2d.ge2dinfo);
         size_src_luma = luma_stride * wave420l_align32(Handle->enc_height);
         size_src_chroma = luma_stride * (wave420l_align16(Handle->enc_height) / 2);
-        y = (char *) Handle->src_vb[Handle->src_idx].virt_addr;
+        y = (char *) Handle->src_picx[Handle->src_idx].vb.virt_addr;
         if (Handle->enc_width % 32) {
             for (uint32 i = 0; i < Handle->enc_height; i++) {
                 memcpy(y + i * luma_stride, (void *) ((char *) amlge2d.ge2dinfo.dst_info.vaddr[0] + i * Handle->enc_width), Handle->enc_width);
             }
         } else {
-            memcpy((void *)Handle->src_vb[Handle->src_idx].virt_addr, amlge2d.ge2dinfo.dst_info.vaddr[0],  Handle->enc_width * Handle->enc_height);
+            memcpy((void *)Handle->src_pics[Handle->src_idx].vb.virt_addr, amlge2d.ge2dinfo.dst_info.vaddr[0],  Handle->enc_width * Handle->enc_height);
         }
-        y = (char *) (Handle->src_vb[Handle->src_idx].virt_addr + size_src_luma);
+        y = (char *) (Handle->src_pics[Handle->src_idx].vb.virt_addr + size_src_luma);
         memcpy(y, (void *) ((char *)amlge2d.ge2dinfo.dst_info.vaddr[0] + Handle->enc_width * Handle->enc_height), chroma_stride * Handle->enc_height / 2);
     } else
 #endif
@@ -1849,7 +1881,7 @@ AMVEnc_Status AML_HEVCSetInput(AMVHEVCEncHandle *Handle, AMVHEVCEncFrameIO *inpu
 
         size_src_chroma = luma_stride * (wave420l_align16(Handle->enc_height) / 2);
 
-        y = (char *) Handle->src_vb[Handle->src_idx].virt_addr;
+        y = (char *) Handle->src_pics[Handle->src_idx].vb.virt_addr;
         if (Handle->enc_width % 32) {
             for (unsigned int i = 0; i < Handle->enc_height; i++) {
                 memcpy(y + i * luma_stride, (void *) ((char *) input->YCbCr[0] + i * Handle->enc_width), Handle->enc_width);
@@ -1858,7 +1890,7 @@ AMVEnc_Status AML_HEVCSetInput(AMVHEVCEncHandle *Handle, AMVHEVCEncFrameIO *inpu
             memcpy(y, (void *) input->YCbCr[0], luma_stride * Handle->enc_height);
         }
 
-        y = (char *) (Handle->src_vb[Handle->src_idx].virt_addr + size_src_luma);
+        y = (char *) (Handle->src_pics[Handle->src_idx].vb.virt_addr + size_src_luma);
         if (Handle->enc_width % 32) {
             for (unsigned int i = 0; i < Handle->enc_height / 2; i++) {
                 memcpy(y + i * chroma_stride, (void *) ((char *) input->YCbCr[1] + i * Handle->enc_width), Handle->enc_width);
@@ -1867,7 +1899,7 @@ AMVEnc_Status AML_HEVCSetInput(AMVHEVCEncHandle *Handle, AMVHEVCEncFrameIO *inpu
             memcpy(y, (void *) input->YCbCr[1], chroma_stride * Handle->enc_height / 2);
         }
     }
-    flush_memory(Handle->instance_id, &Handle->src_vb[Handle->src_idx]);
+    flush_memory(Handle->instance_id, &Handle->src_pics[Handle->src_idx].vb);
     return AMVENC_SUCCESS;
 }
 
@@ -1925,8 +1957,8 @@ AMVEnc_Status AML_HEVCRelease(AMVHEVCEncHandle *Handle) {
     Wave4VpuEncFiniSeq(Handle);
 
     for (unsigned int i = 0; i < Handle->src_num; i++) {
-        if (Handle->src_vb[i].size) {
-            vdi_free_dma_memory(Handle->instance_id, &Handle->src_vb[i]);
+        if (Handle->src_pics[i].vb.size) {
+            vdi_free_dma_memory(Handle->instance_id, &Handle->src_pics[i].vb);
         }
     }
     for (unsigned int i = 0; i < Handle->fb_num; i++) {

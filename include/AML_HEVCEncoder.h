@@ -35,7 +35,7 @@ typedef struct FrameIOhevc_s {
     int height;
     uint32 disp_order;
     uint is_reference;
-    uint32 coding_timestamp;
+    uint32 coding_timestamp; /* cts */
     uint32 op_flag;
     uint32 canvas;
     uint32 bitrate;
@@ -114,6 +114,25 @@ typedef struct {
     amvhevcenc_hw_t hw_info;
 } hevc_info_t;
 
+typedef struct hevc_picture_s {
+    int64_t pts; // presentation timestamp
+    int64_t dts; // decoding timestamp
+
+    uint32_t op_flag;
+    float frame_rate;
+
+    uint32_t type; // slice type
+
+    vpu_buffer_t vb; // buffer
+
+    uint32_t order; // display order basement of pts
+
+    int width;
+    int height;
+
+    AMVEncFrameFmt fmt; // frame format, nv12, nv21
+} hevc_picture_t;
+
 typedef struct AMVHEVCEncHandle_s {
     uint32 instance_id;
     uint32 src_idx;
@@ -139,7 +158,7 @@ typedef struct AMVHEVCEncHandle_s {
     vpu_buffer_t work_vb;
     vpu_buffer_t temp_vb;
     vpu_buffer_t bs_vb;
-    vpu_buffer_t src_vb[4];
+    hevc_picture_t src_pics[4];
     vpu_buffer_t fb_vb[4];
     vpu_buffer_t fbc_ltable_vb;
     vpu_buffer_t fbc_ctable_vb;

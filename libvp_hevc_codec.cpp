@@ -148,8 +148,8 @@ int vl_video_encoder_encode(vl_codec_handle_t codec_handle, vl_frame_type_t fram
         videoInput.pitch = handle->mEncParams->width;//((handle->mEncParams.width + 15) >> 4) << 4;
         /* TODO*/
         videoInput.bitrate = handle->mEncParams->bitrate;
-        videoInput.frame_rate = handle->mEncParams->frame_rate / 1000;
-        videoInput.coding_timestamp = handle->mNumInputFrames * 1000 / videoInput.frame_rate;  // in ms
+        videoInput.frame_rate = (float)handle->mEncParams->frame_rate;
+        videoInput.coding_timestamp = (float)(handle->mNumInputFrames * 1000) / (float)videoInput.frame_rate;  // in ms
         videoInput.YCbCr[0] = (unsigned long)&in[0];
         videoInput.YCbCr[1] = (unsigned long)(videoInput.YCbCr[0] + videoInput.height * videoInput.pitch);
 
