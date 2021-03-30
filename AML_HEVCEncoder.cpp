@@ -126,7 +126,7 @@ void dumpCodedPicture(AMVHEVCEncHandle *Handle, const int idx, const unsigned ch
     VLOG(INFO, "-------------- Picture[%d] dump --------------", idx);
     VLOG(INFO, " widthxheight - %dx%d", Handle->src_pics[idx].width, Handle->src_pics[idx].height);
     VLOG(INFO, " nal_type     - %x", Handle->src_pics[idx].type);
-    VLOG(INFO, " order, pts   - %d, %d", Handle->src_pics[idx].order,  Handle->src_pics[idx].pts);
+    VLOG(INFO, " order, pts   - %d, %ld", Handle->src_pics[idx].order,  Handle->src_pics[idx].pts);
     VLOG(INFO, " nal_length   - %d", nal_length);
     VLOG(INFO, "-------------- NAL + PayLoad Start -----------------");
 
